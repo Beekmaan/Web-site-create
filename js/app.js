@@ -3,6 +3,7 @@
 
   // ---------- Config ----------
   const STORAGE_KEY = 'minii-sankhuu:v1';
+  const PREFS_KEY = 'minii-sankhuu:prefs';
   const MONTHS = ['1-р сар', '2-р сар', '3-р сар', '4-р сар', '5-р сар', '6-р сар',
     '7-р сар', '8-р сар', '9-р сар', '10-р сар', '11-р сар', '12-р сар'];
 
@@ -30,15 +31,9 @@
     [...CATEGORIES.expense, ...CATEGORIES.income].map(c => [c.id, c])
   );
 
-  // ---------- State ----------
-  const today = new Date();
-  let state = load();
-  let view = { year: today.getFullYear(), month: today.getMonth() };
-  let editingId = null;
-  let activeChart = 'category';
-
   // ---------- Helpers ----------
   const $ = id => document.getElementById(id);
+  const today = new Date();
   const fmt = n => Math.round(n).toLocaleString('en-US') + ' ₮';
   const fmtShort = n => {
     const a = Math.abs(n);
@@ -52,45 +47,183 @@
   const escapeHtml = s => String(s).replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const parseAmount = s => Number(String(s).replace(/[^\d.]/g, '')) || 0;
+  const monthKey = date => 'm-' + date.slice(0, 7);
   const inMonth = (tx, y, m) => {
     const [ty, tm] = tx.date.split('-').map(Number);
     return ty === y && tm - 1 === m;
   };
+  const cleanTx = t => ({
+    id: String(t.id || uid()).replace(/[^\w-]/g, '').slice(0, 40) || uid(),
+    type: t.type === 'income' ? 'income' : 'expense',
+    amount: Math.round(Number(t.amount)),
+    category: CAT_MAP[t.category] ? t.category : (t.type === 'income' ? 'other_i' : 'other_e'),
+    date: t.date,
+    note: String(t.note || '').slice(0, 80),
+  });
+  const validTx = t => t && (t.type === 'income' || t.type === 'expense') &&
+    Number(t.amount) > 0 && /^\d{4}-\d{2}-\d{2}$/.test(t.date);
 
-  function load() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const data = JSON.parse(raw);
-        return { transactions: data.transactions || [], budget: data.budget || 0, theme: data.theme || null };
+  function readJson(key, fallback) {
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; }
+  }
+  function writeJson(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* storage unavailable */ }
+  }
+
+  // ---------- State ----------
+  const hosted = !!(window.claude && typeof window.claude.use === 'function');
+  const prefs = Object.assign({ theme: null, demoHidden: false }, readJson(PREFS_KEY, {}));
+  let state = { transactions: [], budget: 0 };
+  let loaded = false;
+  let view = { year: today.getFullYear(), month: today.getMonth() };
+  let editingId = null;
+  let activeChart = 'category';
+  const demoTx = buildDemo();
+
+  const isDemo = () => loaded && state.transactions.length === 0 && !prefs.demoHidden;
+  const allTx = () => isDemo() ? demoTx : state.transactions;
+  const savePrefs = () => writeJson(PREFS_KEY, prefs);
+
+  // ---------- Storage: private cloud (hosted) or this browser ----------
+  const store = {
+    mode: 'local',
+    db: null,
+    col: null,
+    readOnly: false,
+    queue: Promise.resolve(),
+
+    initLocal() {
+      this.mode = 'local';
+      const data = readJson(STORAGE_KEY, null);
+      if (data) {
+        state.transactions = (data.transactions || []).filter(validTx).map(cleanTx);
+        state.budget = Number(data.budget) || 0;
+        if (data.theme && !prefs.theme) prefs.theme = data.theme;
       }
-    } catch (e) { /* storage unavailable */ }
-    return { transactions: [], budget: 0, theme: null };
-  }
+      loaded = true;
+    },
 
-  function save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
-  }
+    async initCloud() {
+      const [db, user] = await Promise.all([window.claude.use('db'), window.claude.use('user')]);
+      const id = user ? await user.id() : null;
+      if (!db || !id) return false;
+      this.mode = 'cloud';
+      this.db = db;
+      this.col = db.collection('data/users/' + id);
+      const timer = setTimeout(() => {
+        if (!loaded) showStorageNotice('Өгөгдөл ачаалж чадахгүй байна. Холболтоо шалгаад түр хүлээнэ үү.');
+      }, 10000);
+      this.col.onSnapshot(snap => {
+        const txs = [];
+        let budget = 0;
+        snap.docs.forEach(d => {
+          const data = d.data() || {};
+          if (d.id === 'settings') budget = Number(data.budget) || 0;
+          else if (d.id.startsWith('m-') && Array.isArray(data.transactions)) {
+            data.transactions.filter(validTx).forEach(t => txs.push(cleanTx(t)));
+          }
+        });
+        state.transactions = txs;
+        state.budget = budget;
+        if (!snap.metadata.fromCache) { clearTimeout(timer); hideStorageNotice(); }
+        loaded = true;
+        render();
+      }, err => {
+        clearTimeout(timer);
+        loaded = true;
+        showStorageNotice('Өгөгдөлтэй холбогдох боломжгүй боллоо. Хуудсаа дахин нээнэ үү.');
+        render();
+      });
+      return true;
+    },
 
+    // Run cloud writes one at a time.
+    enqueue(fn) {
+      this.queue = this.queue.then(fn).catch(err => {
+        if (err && err.code === 'invalid_argument') {
+          this.readOnly = true;
+          toast('Танд энэ хуудсанд хадгалах эрх алга байна');
+        } else if (err && err.code === 'quota_exceeded') {
+          toast('Хадгалах багтаамж дүүрсэн байна');
+        } else {
+          toast('Хадгалж чадсангүй. Дахин оролдоно уу');
+        }
+      });
+      return this.queue;
+    },
+
+    saveMonths(keys) {
+      if (this.mode === 'local') return writeJson(STORAGE_KEY, state);
+      [...new Set(keys)].forEach(key => this.enqueue(() => {
+        const txs = state.transactions.filter(t => monthKey(t.date) === key);
+        const ref = this.col.doc(key);
+        return txs.length ? ref.set({ transactions: txs }) : ref.delete();
+      }));
+    },
+
+    saveSettings() {
+      if (this.mode === 'local') return writeJson(STORAGE_KEY, state);
+      this.enqueue(() => this.col.doc('settings').set({ budget: state.budget }));
+    },
+
+    // Replace everything (import / clear).
+    replaceAll(oldTxs) {
+      const keys = [...oldTxs, ...state.transactions].map(t => monthKey(t.date));
+      this.saveMonths(keys);
+      this.saveSettings();
+    },
+  };
+
+  function showStorageNotice(text) {
+    const n = $('storageNotice');
+    n.textContent = text;
+    n.classList.remove('hidden');
+  }
+  function hideStorageNotice() { $('storageNotice').classList.add('hidden'); }
+
+  // ---------- Toast & dialog ----------
   function toast(msg) {
     const t = $('toast');
     t.textContent = msg;
     t.classList.add('show');
     clearTimeout(toast._t);
-    toast._t = setTimeout(() => t.classList.remove('show'), 2200);
+    toast._t = setTimeout(() => t.classList.remove('show'), 2400);
+  }
+
+  function confirmDialog({ title, text, ok = 'Устгах' }) {
+    return new Promise(resolve => {
+      const m = $('modal');
+      $('modalTitle').textContent = title;
+      $('modalText').textContent = text;
+      $('modalOk').textContent = ok;
+      m.classList.remove('hidden');
+      $('modalCancel').focus();
+      const done = v => {
+        m.classList.add('hidden');
+        $('modalOk').onclick = $('modalCancel').onclick = m.onclick = document.onkeydown = null;
+        resolve(v);
+      };
+      $('modalOk').onclick = () => done(true);
+      $('modalCancel').onclick = () => done(false);
+      m.onclick = e => { if (e.target === m) done(false); };
+      document.onkeydown = e => { if (e.key === 'Escape') done(false); };
+    });
   }
 
   // ---------- Theme ----------
   function applyTheme() {
-    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const theme = state.theme || (prefersDark ? 'dark' : 'light');
-    document.documentElement.dataset.theme = theme;
+    if (hosted) return; // the viewer sets the theme
+    if (prefs.theme) document.documentElement.dataset.theme = prefs.theme;
+    else delete document.documentElement.dataset.theme;
+  }
+  function currentTheme() {
+    const t = document.documentElement.dataset.theme;
+    if (t) return t;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   }
 
   // ---------- Form ----------
-  function currentType() {
-    return document.querySelector('input[name="type"]:checked').value;
-  }
+  const currentType = () => document.querySelector('input[name="type"]:checked').value;
 
   function fillCategories(type, selected) {
     $('category').innerHTML = CATEGORIES[type]
@@ -103,9 +236,8 @@
     $('txForm').reset();
     $('typeExpense').checked = true;
     fillCategories('expense');
-    const d = (view.year === today.getFullYear() && view.month === today.getMonth())
-      ? today : new Date(view.year, view.month, 1);
-    $('date').value = isoDate(d);
+    const isNow = view.year === today.getFullYear() && view.month === today.getMonth();
+    $('date').value = isoDate(isNow ? today : new Date(view.year, view.month, 1));
     $('formTitle').textContent = 'Гүйлгээ нэмэх';
     $('submitBtn').textContent = 'Нэмэх';
     $('cancelEdit').classList.add('hidden');
@@ -124,43 +256,52 @@
     $('submitBtn').textContent = 'Хадгалах';
     $('cancelEdit').classList.remove('hidden');
     $('txForm').scrollIntoView({ behavior: 'smooth', block: 'center' });
-    $('amount').focus();
+    $('amount').focus({ preventScroll: true });
   }
 
   function onSubmit(e) {
     e.preventDefault();
+    if (!loaded) return toast('Өгөгдөл ачаалж байна, түр хүлээнэ үү');
     const amount = parseAmount($('amount').value);
-    if (amount <= 0) { toast('Дүнгээ зөв оруулна уу'); $('amount').focus(); return; }
-    const tx = {
+    if (amount <= 0) { toast('Дүнгээ 0-ээс их тоогоор оруулна уу'); $('amount').focus(); return; }
+    if (!$('date').value) { toast('Огноогоо сонгоно уу'); $('date').focus(); return; }
+    const tx = cleanTx({
       id: editingId || uid(),
       type: currentType(),
       amount,
       category: $('category').value,
       date: $('date').value,
       note: $('note').value.trim(),
-    };
+    });
+    const keys = [monthKey(tx.date)];
     if (editingId) {
+      const old = state.transactions.find(t => t.id === editingId);
+      if (old) keys.push(monthKey(old.date));
       state.transactions = state.transactions.map(t => t.id === editingId ? tx : t);
-      toast('Засвар хадгалагдлаа ✓');
+      toast('Засвар хадгалагдлаа');
     } else {
       state.transactions.push(tx);
-      toast(tx.type === 'income' ? 'Орлого нэмэгдлээ ✓' : 'Зарлага нэмэгдлээ ✓');
+      if (!prefs.demoHidden) { prefs.demoHidden = true; savePrefs(); }
+      toast(tx.type === 'income' ? 'Орлого нэмэгдлээ' : 'Зарлага нэмэгдлээ');
     }
-    // jump to the transaction's month
     const [y, m] = tx.date.split('-').map(Number);
     view = { year: y, month: m - 1 };
-    save();
+    store.saveMonths(keys);
     resetForm();
     render();
   }
 
-  function removeTx(id) {
+  async function removeTx(id) {
     const tx = state.transactions.find(t => t.id === id);
     if (!tx) return;
-    if (!confirm(`"${tx.note || CAT_MAP[tx.category]?.name}" — ${fmt(tx.amount)} устгах уу?`)) return;
+    const ok = await confirmDialog({
+      title: 'Гүйлгээ устгах уу?',
+      text: `${tx.note || CAT_MAP[tx.category]?.name} — ${fmt(tx.amount)}`,
+    });
+    if (!ok) return;
     state.transactions = state.transactions.filter(t => t.id !== id);
     if (editingId === id) resetForm();
-    save();
+    store.saveMonths([monthKey(tx.date)]);
     render();
     toast('Устгагдлаа');
   }
@@ -168,12 +309,15 @@
   // ---------- Render ----------
   function render() {
     $('monthLabel').textContent = `${view.year} оны ${MONTHS[view.month]}`;
-    const monthTx = state.transactions.filter(t => inMonth(t, view.year, view.month));
+    const txs = allTx();
+    const monthTx = txs.filter(t => inMonth(t, view.year, view.month));
+    const budget = isDemo() ? (state.budget || 1800000) : state.budget;
+    $('demoBanner').classList.toggle('hidden', !isDemo());
     renderSummary(monthTx);
-    renderBudget(monthTx);
+    renderBudget(monthTx, budget);
     renderList(monthTx);
     renderDonut(monthTx);
-    renderBars();
+    renderBars(txs);
   }
 
   function renderSummary(txs) {
@@ -191,28 +335,34 @@
     $('savingRate').textContent = `Хэмнэлт: ${rate}%`;
   }
 
-  function renderBudget(txs) {
+  function renderBudget(txs, budget) {
     const spent = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
     const bar = $('budgetBar');
     bar.classList.remove('warn', 'over');
-    if (!state.budget) {
+    if (!budget) {
       bar.style.width = '0';
       $('budgetText').textContent = 'Төсөв тохируулаагүй байна. Сарын зарлагын дээд хязгаараа тогтоогоорой.';
       return;
     }
-    const pct = (spent / state.budget) * 100;
+    const pct = (spent / budget) * 100;
     bar.style.width = Math.min(pct, 100) + '%';
     if (pct >= 100) bar.classList.add('over');
     else if (pct >= 80) bar.classList.add('warn');
-    const left = state.budget - spent;
+    const left = budget - spent;
     $('budgetText').innerHTML = left >= 0
-      ? `<strong>${fmt(spent)}</strong> / ${fmt(state.budget)} зарцуулсан · <strong>${fmt(left)}</strong> үлдсэн (${Math.round(pct)}%)`
-      : `⚠️ Төсөв <strong>${fmt(-left)}</strong>-өөр хэтэрсэн (${Math.round(pct)}%)`;
+      ? `<strong>${fmt(spent)}</strong> / ${fmt(budget)} зарцуулсан · <strong>${fmt(left)}</strong> үлдсэн (${Math.round(pct)}%)`
+      : `Төсөв <strong>${fmt(-left)}</strong>-өөр хэтэрсэн (${Math.round(pct)}%)`;
   }
 
   function renderList(txs) {
+    if (!loaded) {
+      $('emptyState').classList.add('hidden');
+      $('txList').innerHTML = '<li class="empty"><p>Өгөгдөл ачаалж байна…</p></li>';
+      return;
+    }
     const q = $('search').value.trim().toLowerCase();
     const type = $('filterType').value;
+    const demo = isDemo();
     const list = txs
       .filter(t => type === 'all' || t.type === type)
       .filter(t => !q || (t.note || '').toLowerCase().includes(q) ||
@@ -221,7 +371,10 @@
 
     const empty = txs.length === 0;
     $('emptyState').classList.toggle('hidden', !empty);
-    $('loadDemo').classList.toggle('hidden', state.transactions.length > 0);
+    $('showDemo').classList.toggle('hidden', state.transactions.length > 0);
+    $('emptyText').textContent = state.transactions.length
+      ? 'Энэ сард гүйлгээ алга байна.'
+      : 'Одоогоор гүйлгээ алга. Дээрх маягтаар эхний гүйлгээгээ нэмээрэй.';
 
     if (!empty && list.length === 0) {
       $('txList').innerHTML = '<li class="empty"><p>Хайлтад тохирох гүйлгээ олдсонгүй.</p></li>';
@@ -233,11 +386,11 @@
     for (const t of list) {
       if (t.date !== lastDate) {
         lastDate = t.date;
-        const [y, m, d] = t.date.split('-').map(Number);
+        const [, m, d] = t.date.split('-').map(Number);
         const label = t.date === isoDate(today) ? 'Өнөөдөр' : `${m}-р сарын ${d}`;
         html += `<li class="tx-day">${label}</li>`;
       }
-      const c = CAT_MAP[t.category] || { name: '—', icon: '•', color: '#888' };
+      const c = CAT_MAP[t.category] || { name: '—', icon: '•', color: '#888888' };
       html += `
         <li class="tx">
           <div class="tx-icon" style="background:${c.color}22">${c.icon}</div>
@@ -246,10 +399,10 @@
             <div class="tx-sub">${c.name}</div>
           </div>
           <div class="tx-amt ${t.type}">${t.type === 'income' ? '+' : '−'}${fmt(t.amount)}</div>
-          <div class="tx-actions">
-            <button data-edit="${t.id}" aria-label="Засах" title="Засах">✏️</button>
-            <button data-del="${t.id}" aria-label="Устгах" title="Устгах">🗑️</button>
-          </div>
+          ${demo ? '' : `<div class="tx-actions">
+            <button data-edit="${t.id}" aria-label="Засах">Засах</button>
+            <button class="del" data-del="${t.id}" aria-label="Устгах">Устгах</button>
+          </div>`}
         </li>`;
     }
     $('txList').innerHTML = html;
@@ -266,20 +419,18 @@
     $('donutTotal').textContent = fmt(total);
 
     const R = 80, r = 56, cx = 100, cy = 100;
+    const mid = (R + r) / 2, w = R - r, C = 2 * Math.PI * mid;
     if (!total) {
-      svg.innerHTML = `<circle cx="${cx}" cy="${cy}" r="${(R + r) / 2}" fill="none"
-        style="stroke:var(--surface-2)" stroke-width="${R - r}"/>`;
+      svg.innerHTML = `<circle cx="${cx}" cy="${cy}" r="${mid}" fill="none" style="stroke:var(--surface-2)" stroke-width="${w}"/>`;
       $('legend').innerHTML = '<li class="muted">Энэ сард зарлага бүртгэгдээгүй.</li>';
       return;
     }
-
-    const mid = (R + r) / 2, w = R - r, C = 2 * Math.PI * mid;
     let offset = 0;
     const gap = entries.length > 1 ? 2 : 0;
     svg.innerHTML = entries.map(([id, v]) => {
       const len = (v / total) * C;
       const seg = `<circle cx="${cx}" cy="${cy}" r="${mid}" fill="none"
-        stroke="${CAT_MAP[id]?.color || '#888'}" stroke-width="${w}"
+        stroke="${CAT_MAP[id]?.color || '#888888'}" stroke-width="${w}"
         stroke-dasharray="${Math.max(len - gap, 0.5)} ${C}"
         stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})">
         <title>${CAT_MAP[id]?.name}: ${fmt(v)}</title></circle>`;
@@ -288,7 +439,7 @@
     }).join('');
 
     $('legend').innerHTML = entries.map(([id, v]) => {
-      const c = CAT_MAP[id] || { name: id, icon: '', color: '#888' };
+      const c = CAT_MAP[id] || { name: id, icon: '', color: '#888888' };
       return `<li><span class="sw" style="background:${c.color}"></span>
         <span class="name">${c.icon} ${c.name}</span>
         <span class="pct">${Math.round((v / total) * 100)}%</span>
@@ -296,13 +447,13 @@
     }).join('');
   }
 
-  function renderBars() {
+  function renderBars(all) {
     const svg = $('bars');
     const months = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date(view.year, view.month - i, 1);
       const y = d.getFullYear(), m = d.getMonth();
-      const txs = state.transactions.filter(t => inMonth(t, y, m));
+      const txs = all.filter(t => inMonth(t, y, m));
       months.push({
         label: `${m + 1}-р сар`,
         inc: txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0),
@@ -323,11 +474,9 @@
             <text x="${L - 8}" y="${y + 4}" text-anchor="end">${fmtShort(v)}</text>`;
     }
     months.forEach((m, i) => {
-      const x = L + slot * i + slot / 2;
-      g += `<text x="${x}" y="${H - 8}" text-anchor="middle">${m.label}</text>`;
+      g += `<text x="${L + slot * i + slot / 2}" y="${H - 8}" text-anchor="middle">${m.label}</text>`;
     });
     g += '</g>';
-
     months.forEach((m, i) => {
       const x = L + slot * i + slot / 2;
       const bar = (v, dx, cls) => {
@@ -347,12 +496,45 @@
     return step * p;
   }
 
-  // ---------- Data tools ----------
-  function download(name, content, type) {
-    const blob = new Blob([content], { type });
+  // ---------- Demo data (shown, never saved) ----------
+  function buildDemo() {
+    const y = today.getFullYear(), m = today.getMonth();
+    const out = [];
+    const day = (k, d) => isoDate(new Date(y, m - k, k === 0 ? Math.min(d, today.getDate()) : d));
+    const add = (type, amount, category, k, d, note) =>
+      out.push({ id: 'demo' + out.length, type, amount, category, date: day(k, d), note });
+    for (let k = 0; k < 6; k++) {
+      add('income', 2400000 + k * 50000, 'salary', k, 5, 'Сарын цалин');
+      if (k % 2 === 0) add('income', 350000, 'business', k, 18, 'Нэмэлт ажил');
+      add('expense', 650000, 'housing', k, 3, 'Байрны түрээс');
+      add('expense', 120000 + k * 8000, 'utilities', k, 10, 'Цахилгаан, интернэт');
+      add('expense', 380000 + (k * 37000) % 120000, 'food', k, 8, 'Дэлгүүр');
+      add('expense', 95000, 'transport', k, 12, 'Такси, автобус');
+      add('expense', 150000 + (k * 53000) % 200000, 'shopping', k, 15, 'Хувцас');
+      add('expense', 60000, 'fun', k, 20, 'Кино');
+    }
+    add('expense', 45000, 'health', 0, 2, 'Эм');
+    add('expense', 18000, 'food', 0, 1, 'Өдрийн хоол');
+    add('income', 200000, 'gift', 0, 1, 'Төрсөн өдрийн бэлэг');
+    return out;
+  }
+
+  // ---------- Files ----------
+  let downloads = null;
+  async function offerFile(filename, data, mime) {
+    if (hosted) {
+      if (!downloads) return toast('Энэ харагдац дээр файл татах боломжгүй');
+      try {
+        await downloads.save({ filename, data });
+      } catch (err) {
+        if (err && err.code === 'rate_limited') toast('Түр хүлээгээд дахин оролдоно уу');
+        else if (err && err.code !== 'declined') toast('Файл татах боломжгүй байна');
+      }
+      return;
+    }
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
+    a.href = URL.createObjectURL(new Blob([data], { type: mime }));
+    a.download = filename;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
@@ -365,62 +547,38 @@
         CAT_MAP[t.category]?.name || t.category, t.amount, t.note || '']);
     });
     const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
-    download(`sankhuu-${isoDate(today)}.csv`, '﻿' + csv, 'text/csv;charset=utf-8');
+    offerFile(`sankhuu-${isoDate(today)}.csv`, '﻿' + csv, 'text/csv;charset=utf-8');
   }
 
   function exportJson() {
-    download(`sankhuu-backup-${isoDate(today)}.json`, JSON.stringify(state, null, 2), 'application/json');
+    if (!state.transactions.length) return toast('Хадгалах өгөгдөл алга');
+    const data = { transactions: state.transactions, budget: state.budget };
+    offerFile(`sankhuu-backup-${isoDate(today)}.json`, JSON.stringify(data, null, 2), 'application/json');
   }
 
   function importJson(file) {
     const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const data = JSON.parse(reader.result);
-        if (!Array.isArray(data.transactions)) throw new Error('bad');
-        const valid = data.transactions.filter(t =>
-          t && (t.type === 'income' || t.type === 'expense') &&
-          Number(t.amount) > 0 && /^\d{4}-\d{2}-\d{2}$/.test(t.date));
-        state.transactions = valid.map(t => ({
-          id: String(t.id || uid()), type: t.type, amount: Number(t.amount),
-          category: CAT_MAP[t.category] ? t.category : (t.type === 'income' ? 'other_i' : 'other_e'),
-          date: t.date, note: String(t.note || '').slice(0, 80),
-        }));
-        state.budget = Number(data.budget) || 0;
-        save(); render();
-        toast(`${valid.length} гүйлгээ сэргээгдлээ ✓`);
-      } catch (e) {
-        toast('Файл буруу байна');
+    reader.onload = async () => {
+      let data;
+      try { data = JSON.parse(reader.result); } catch (e) { data = null; }
+      if (!data || !Array.isArray(data.transactions)) return toast('Файл таарахгүй байна. Энэ сайтаас хадгалсан JSON нөөц сонгоно уу');
+      const valid = data.transactions.filter(validTx).map(cleanTx);
+      if (state.transactions.length) {
+        const ok = await confirmDialog({
+          title: 'Нөөцөөс сэргээх үү?',
+          text: `Одоогийн ${state.transactions.length} гүйлгээг нөөцийн ${valid.length} гүйлгээгээр солино.`,
+          ok: 'Сэргээх',
+        });
+        if (!ok) return;
       }
+      const old = state.transactions;
+      state.transactions = valid;
+      state.budget = Number(data.budget) || 0;
+      store.replaceAll(old);
+      resetForm(); render();
+      toast(`${valid.length} гүйлгээ сэргээгдлээ`);
     };
     reader.readAsText(file);
-  }
-
-  function loadDemo() {
-    const y = view.year, m = view.month;
-    const isNow = y === today.getFullYear() && m === today.getMonth();
-    // current month: keep demo dates on or before today
-    const prev = (k, day) => isoDate(new Date(y, m - k, (k === 0 && isNow) ? Math.min(day, today.getDate()) : day));
-    const demo = [];
-    const add = (type, amount, category, date, note) =>
-      demo.push({ id: uid(), type, amount, category, date, note });
-    for (let k = 0; k < 6; k++) {
-      add('income', 2400000 + k * 50000, 'salary', prev(k, 5), 'Сарын цалин');
-      if (k % 2 === 0) add('income', 350000, 'business', prev(k, 18), 'Нэмэлт ажил');
-      add('expense', 650000, 'housing', prev(k, 3), 'Байрны түрээс');
-      add('expense', 120000 + k * 8000, 'utilities', prev(k, 10), 'Цахилгаан, интернэт');
-      add('expense', 380000 + (k * 37000) % 120000, 'food', prev(k, 8), 'Дэлгүүр');
-      add('expense', 95000, 'transport', prev(k, 12), 'Такси, автобус');
-      add('expense', 150000 + (k * 53000) % 200000, 'shopping', prev(k, 15), 'Хувцас');
-      add('expense', 60000, 'fun', prev(k, 20), 'Кино');
-    }
-    add('expense', 45000, 'health', prev(0, 2), 'Эм');
-    add('expense', 18000, 'food', prev(0, 1), 'Өдрийн хоол');
-    add('income', 200000, 'gift', prev(0, 1), 'Төрсөн өдрийн бэлэг');
-    state.transactions = demo;
-    if (!state.budget) state.budget = 1800000;
-    save(); render();
-    toast('Жишээ өгөгдөл ачааллаа');
   }
 
   // ---------- Events ----------
@@ -430,17 +588,19 @@
     document.querySelectorAll('input[name="type"]').forEach(r =>
       r.addEventListener('change', () => fillCategories(currentType())));
 
-    $('amount').addEventListener('input', e => {
+    const groupDigits = e => {
       const n = parseAmount(e.target.value);
       e.target.value = n ? Math.floor(n).toLocaleString('en-US') : '';
-    });
+    };
+    $('amount').addEventListener('input', groupDigits);
+    $('budgetInput').addEventListener('input', groupDigits);
 
     $('prevMonth').addEventListener('click', () => shiftMonth(-1));
     $('nextMonth').addEventListener('click', () => shiftMonth(1));
 
     $('themeToggle').addEventListener('click', () => {
-      state.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-      save(); applyTheme();
+      prefs.theme = currentTheme() === 'dark' ? 'light' : 'dark';
+      savePrefs(); applyTheme();
     });
 
     $('search').addEventListener('input', render);
@@ -461,11 +621,26 @@
     }));
 
     $('editBudget').addEventListener('click', () => {
-      const v = prompt('Сарын зарлагын төсөв (₮):', state.budget ? String(state.budget) : '');
-      if (v === null) return;
-      state.budget = parseAmount(v);
-      save(); render();
-      toast(state.budget ? 'Төсөв хадгалагдлаа ✓' : 'Төсөв цуцлагдлаа');
+      $('budgetForm').classList.remove('hidden');
+      $('budgetInput').value = state.budget ? state.budget.toLocaleString('en-US') : '';
+      $('budgetInput').focus();
+    });
+    $('budgetCancel').addEventListener('click', () => $('budgetForm').classList.add('hidden'));
+    $('budgetForm').addEventListener('submit', e => {
+      e.preventDefault();
+      if (!loaded) return;
+      state.budget = parseAmount($('budgetInput').value);
+      $('budgetForm').classList.add('hidden');
+      store.saveSettings();
+      render();
+      toast(state.budget ? 'Төсөв хадгалагдлаа' : 'Төсөв цуцлагдлаа');
+    });
+
+    $('hideDemo').addEventListener('click', () => { prefs.demoHidden = true; savePrefs(); render(); });
+    $('showDemo').addEventListener('click', () => {
+      prefs.demoHidden = false; savePrefs();
+      view = { year: today.getFullYear(), month: today.getMonth() };
+      render();
     });
 
     $('exportCsv').addEventListener('click', exportCsv);
@@ -474,16 +649,24 @@
       if (e.target.files[0]) importJson(e.target.files[0]);
       e.target.value = '';
     });
-    $('clearAll').addEventListener('click', () => {
+    $('clearAll').addEventListener('click', async () => {
       if (!state.transactions.length) return toast('Устгах өгөгдөл алга');
-      if (!confirm('Бүх гүйлгээг устгах уу? Энэ үйлдлийг буцаах боломжгүй.')) return;
+      const ok = await confirmDialog({
+        title: 'Бүх гүйлгээг устгах уу?',
+        text: `${state.transactions.length} гүйлгээ бүрмөсөн устна. Буцаах боломжгүй тул эхлээд нөөц хадгалахыг зөвлөе.`,
+        ok: 'Бүгдийг устгах',
+      });
+      if (!ok) return;
+      const old = state.transactions;
       state.transactions = [];
-      save(); resetForm(); render();
+      prefs.demoHidden = true; savePrefs();
+      store.replaceAll(old);
+      resetForm(); render();
       toast('Бүх өгөгдөл устгагдлаа');
     });
-    $('loadDemo').addEventListener('click', loadDemo);
 
     document.addEventListener('keydown', e => {
+      if (!$('modal').classList.contains('hidden')) return;
       if (e.target.matches('input, select, textarea')) return;
       if (e.key === 'ArrowLeft') shiftMonth(-1);
       if (e.key === 'ArrowRight') shiftMonth(1);
@@ -498,8 +681,29 @@
   }
 
   // ---------- Init ----------
-  applyTheme();
-  bind();
-  resetForm();
-  render();
+  async function init() {
+    applyTheme();
+    bind();
+    resetForm();
+    if (!hosted) {
+      store.initLocal();
+      render();
+      return;
+    }
+    $('themeToggle').classList.add('hidden');
+    render(); // loading state
+    let cloud = false;
+    try { cloud = await store.initCloud(); } catch (e) { cloud = false; }
+    downloads = await window.claude.use('downloads').catch(() => null);
+    if (!downloads) ['exportCsv', 'exportJson'].forEach(id => $(id).classList.add('hidden'));
+    if (cloud) {
+      $('storageText').textContent = 'Өгөгдөл таны бүртгэлд нууцаар хадгалагдана — энэ хуудсыг нээсэн хүн бүр зөвхөн өөрийнхөө өгөгдлийг харна.';
+    } else {
+      store.initLocal();
+      $('storageText').textContent = 'Нэвтрээгүй тул өгөгдөл зөвхөн энэ хөтөч дээр хадгалагдана.';
+      render();
+    }
+  }
+
+  init();
 })();

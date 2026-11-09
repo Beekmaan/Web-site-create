@@ -2,51 +2,58 @@
 <html lang="mn">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Миний Санхүү</title>
   <meta name="description" content="Хувийн орлого, зарлагаа хянах энгийн веб апп" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
+<!-- APP:START -->
   <header class="topbar">
-    <div class="brand">
-      <span class="logo" aria-hidden="true">₮</span>
-      <div>
-        <h1>Миний Санхүү</h1>
-        <p class="sub">Орлого, зарлагаа хянах</p>
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">₮</span>
+        <div>
+          <h1>Миний Санхүү</h1>
+          <p class="sub">Орлого, зарлагаа хянах</p>
+        </div>
       </div>
-    </div>
-    <div class="top-actions">
-      <div class="month-nav">
-        <button class="icon-btn" id="prevMonth" aria-label="Өмнөх сар">‹</button>
-        <span id="monthLabel" class="month-label"></span>
-        <button class="icon-btn" id="nextMonth" aria-label="Дараах сар">›</button>
+      <div class="top-actions">
+        <div class="month-nav">
+          <button class="icon-btn" id="prevMonth" aria-label="Өмнөх сар">‹</button>
+          <span id="monthLabel" class="month-label"></span>
+          <button class="icon-btn" id="nextMonth" aria-label="Дараах сар">›</button>
+        </div>
+        <button class="icon-btn" id="themeToggle" aria-label="Өнгөний горим солих">◐</button>
       </div>
-      <button class="icon-btn" id="themeToggle" aria-label="Өнгөний горим солих">◐</button>
     </div>
   </header>
 
   <main class="container">
-    <!-- Summary cards -->
+    <div class="notice hidden" id="demoBanner">
+      <span><strong>Жишээ өгөгдөл.</strong> Эхний гүйлгээгээ нэмэхэд жишээ арилж, таны өгөгдөл эхэлнэ.</span>
+      <button class="link-btn" id="hideDemo">Жишээг нуух</button>
+    </div>
+    <div class="notice info hidden" id="storageNotice"></div>
+
     <section class="cards">
       <article class="card stat income">
-        <div class="stat-head"><span class="dot"></span>Орлого</div>
+        <div class="stat-head">Орлого</div>
         <div class="stat-value" id="sumIncome">0 ₮</div>
         <div class="stat-foot" id="incomeCount">0 гүйлгээ</div>
       </article>
       <article class="card stat expense">
-        <div class="stat-head"><span class="dot"></span>Зарлага</div>
+        <div class="stat-head">Зарлага</div>
         <div class="stat-value" id="sumExpense">0 ₮</div>
         <div class="stat-foot" id="expenseCount">0 гүйлгээ</div>
       </article>
       <article class="card stat balance">
-        <div class="stat-head"><span class="dot"></span>Үлдэгдэл</div>
+        <div class="stat-head">Үлдэгдэл</div>
         <div class="stat-value" id="sumBalance">0 ₮</div>
         <div class="stat-foot" id="savingRate">Хэмнэлт: 0%</div>
       </article>
     </section>
 
-    <!-- Budget -->
     <section class="card budget">
       <div class="budget-head">
         <h2>Сарын төсөв</h2>
@@ -54,10 +61,14 @@
       </div>
       <div class="progress"><div class="progress-bar" id="budgetBar"></div></div>
       <p class="muted" id="budgetText">Төсөв тохируулаагүй байна.</p>
+      <form class="budget-form hidden" id="budgetForm">
+        <input type="text" inputmode="numeric" id="budgetInput" placeholder="Жишээ: 1,800,000" aria-label="Сарын зарлагын төсөв" />
+        <button type="submit" class="btn primary">Хадгалах</button>
+        <button type="button" class="btn ghost" id="budgetCancel">Болих</button>
+      </form>
     </section>
 
     <div class="grid">
-      <!-- Form -->
       <section class="card">
         <h2 id="formTitle">Гүйлгээ нэмэх</h2>
         <form id="txForm" autocomplete="off">
@@ -67,29 +78,22 @@
             <input type="radio" name="type" id="typeIncome" value="income" />
             <label for="typeIncome">+ Орлого</label>
           </div>
-
           <label class="field">
             <span>Дүн (₮)</span>
             <input type="text" inputmode="numeric" id="amount" placeholder="0" required />
           </label>
-
           <label class="field">
             <span>Ангилал</span>
             <select id="category" required></select>
           </label>
-
-          <div class="row">
-            <label class="field">
-              <span>Огноо</span>
-              <input type="date" id="date" required />
-            </label>
-          </div>
-
+          <label class="field">
+            <span>Огноо</span>
+            <input type="date" id="date" required />
+          </label>
           <label class="field">
             <span>Тайлбар</span>
             <input type="text" id="note" maxlength="80" placeholder="Жишээ: Өдрийн хоол" />
           </label>
-
           <div class="form-actions">
             <button type="submit" class="btn primary" id="submitBtn">Нэмэх</button>
             <button type="button" class="btn ghost hidden" id="cancelEdit">Болих</button>
@@ -97,11 +101,10 @@
         </form>
       </section>
 
-      <!-- Charts -->
       <section class="card">
         <div class="tabs" role="tablist">
-          <button class="tab active" data-chart="category" role="tab">Ангиллаар</button>
-          <button class="tab" data-chart="trend" role="tab">6 сарын явц</button>
+          <button class="tab active" data-chart="category" role="tab" id="tabCategory">Ангиллаар</button>
+          <button class="tab" data-chart="trend" role="tab" id="tabTrend">6 сарын явц</button>
         </div>
         <div id="chartCategory" class="chart-wrap">
           <div class="donut-wrap">
@@ -123,13 +126,12 @@
       </section>
     </div>
 
-    <!-- Transactions -->
     <section class="card">
       <div class="list-head">
         <h2>Гүйлгээнүүд</h2>
         <div class="filters">
-          <input type="search" id="search" placeholder="Хайх…" />
-          <select id="filterType">
+          <input type="search" id="search" placeholder="Хайх…" aria-label="Хайх" />
+          <select id="filterType" aria-label="Төрлөөр шүүх">
             <option value="all">Бүгд</option>
             <option value="income">Орлого</option>
             <option value="expense">Зарлага</option>
@@ -138,28 +140,37 @@
       </div>
       <ul class="tx-list" id="txList"></ul>
       <div class="empty hidden" id="emptyState">
-        <div class="empty-icon">🧾</div>
-        <p>Энэ сард гүйлгээ алга байна.</p>
-        <button class="link-btn" id="loadDemo">Жишээ өгөгдөл ачаалах</button>
+        <p id="emptyText">Энэ сард гүйлгээ алга байна.</p>
+        <button class="link-btn" id="showDemo">Жишээ өгөгдөл харах</button>
       </div>
     </section>
 
-    <!-- Data tools -->
     <section class="card tools">
       <h2>Өгөгдөл</h2>
       <div class="tool-btns">
-        <button class="btn ghost" id="exportCsv">⬇ CSV татах</button>
-        <button class="btn ghost" id="exportJson">⬇ Нөөц (JSON)</button>
-        <label class="btn ghost" for="importJson">⬆ Нөөц сэргээх</label>
-        <input type="file" id="importJson" accept="application/json" class="hidden" />
-        <button class="btn danger" id="clearAll">🗑 Бүгдийг устгах</button>
+        <button class="btn ghost" id="exportCsv">CSV татах</button>
+        <button class="btn ghost" id="exportJson">Нөөц хадгалах (JSON)</button>
+        <label class="btn ghost" for="importJson" id="importLabel">Нөөцөөс сэргээх</label>
+        <input type="file" id="importJson" accept="application/json,.json" class="hidden" />
+        <button class="btn danger-soft" id="clearAll">Бүгдийг устгах</button>
       </div>
-      <p class="muted small">Өгөгдөл зөвхөн таны хөтөч (browser) дээр хадгалагдана.</p>
+      <p class="muted small" id="storageText">Өгөгдөл зөвхөн таны хөтөч (browser) дээр хадгалагдана.</p>
     </section>
   </main>
 
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="modal hidden" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-box">
+      <h3 id="modalTitle"></h3>
+      <p id="modalText"></p>
+      <div class="modal-actions">
+        <button class="btn ghost" id="modalCancel">Болих</button>
+        <button class="btn danger" id="modalOk">Устгах</button>
+      </div>
+    </div>
+  </div>
 
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<!-- APP:END -->
   <script src="js/app.js"></script>
 </body>
 </html>
