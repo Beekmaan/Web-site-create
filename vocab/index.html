@@ -11,13 +11,13 @@
 <!-- APP:START -->
   <header class="topbar">
     <div class="topbar-inner">
-      <div class="brand">
+      <button class="brand" id="homeBtn" type="button" aria-label="Нүүр хуудас">
         <span class="logo" aria-hidden="true">Aa</span>
-        <div>
-          <h1>Үгийн Сан</h1>
-          <p class="sub">Дуудлага · Ижил үгс · Дунд түвшний орлуулга</p>
-        </div>
-      </div>
+        <span class="brand-text">
+          <span class="brand-name">Үгийн Сан</span>
+          <span class="sub">Дуудлага · Ижил үгс · Дунд түвшний орлуулга</span>
+        </span>
+      </button>
       <button class="icon-btn" id="themeToggle" aria-label="Өнгөний горим солих">🌓</button>
     </div>
   </header>
@@ -26,7 +26,7 @@
     <form class="search" id="searchForm" autocomplete="off">
       <div class="search-box">
         <span class="search-icon" aria-hidden="true">⌕</span>
-        <input id="q" type="search" list="sugList" placeholder="Англи үг бичнэ үү… (жш: ubiquitous)" aria-label="Англи үг" spellcheck="false" autocapitalize="off" />
+        <input id="q" type="search" list="sugList" placeholder="Англи үг эсвэл монгол утга… (жш: ubiquitous)" aria-label="Англи үг" spellcheck="false" autocapitalize="off" />
         <datalist id="sugList"></datalist>
       </div>
       <button class="btn primary" type="submit">Хайх</button>
@@ -44,6 +44,7 @@
         <div class="feature"><span class="f-ico">🔊</span><b>Дуудлага</b><span>IPA тэмдэглэгээ, 🇺🇸 / 🇬🇧 аудио, удаан горим</span></div>
         <div class="feature"><span class="f-ico">🔁</span><b>Ижил төстэй үгс</b><span>Түвшингээр өнгөөр ялгагдсан</span></div>
         <div class="feature hl"><span class="f-ico">🎯</span><b>Дунд түвшний орлуулга</b><span>Ахисан (C1/C2) үгийн энгийн (B1/B2) хувилбар</span></div>
+        <div class="feature"><span class="f-ico">📚</span><b><span id="totalCount"></span> ахисан үг</b><span>Монгол утга, IPA-тай. Монголоор хайж болно</span></div>
       </div>
       <p class="try">Туршаад үзээрэй:</p>
       <div class="chips" id="examples"></div>
@@ -82,7 +83,7 @@
 
       <article class="card" id="synCard">
         <div class="card-head">
-          <h3>🔁 Ижил төстэй үгс</h3>
+          <h3 id="synTitle">🔁 Ижил төстэй үгс</h3>
           <div class="legend">
             <span class="lvl lvl-A">A</span><span class="lvl lvl-B1">B1</span><span class="lvl lvl-B2">B2</span><span class="lvl lvl-C1">C1</span><span class="lvl lvl-C2">C2</span>
           </div>
@@ -98,10 +99,23 @@
       </div>
       <ul class="saved-list" id="savedList"></ul>
     </section>
+    <section class="card browse" id="browseCard">
+      <div class="card-head">
+        <h3>📚 Ахисан үгийн жагсаалт <span class="count" id="browseCount"></span></h3>
+        <div class="seg" id="browseLevels" role="group" aria-label="Түвшингээр шүүх">
+          <button type="button" data-lvl="all" aria-pressed="true">Бүгд</button>
+          <button type="button" data-lvl="C1" aria-pressed="false">C1</button>
+          <button type="button" data-lvl="C2" aria-pressed="false">C2</button>
+        </div>
+      </div>
+      <input id="browseFilter" class="filter" type="search" placeholder="Шүүх: үсэг, англи эсвэл монгол үг…" aria-label="Жагсаалтыг шүүх" spellcheck="false" autocapitalize="off" />
+      <ul class="word-rows" id="browseList"></ul>
+      <button class="btn more" id="browseMore" type="button" hidden>Цааш үзэх</button>
+    </section>
   </main>
 
   <footer class="foot">
-    Түвшин нь үгийн хэрэглээний давтамжаар ойролцоогоор тооцогдоно (≈). Эх сурвалж: Free Dictionary API, Datamuse.
+    Түвшин нь үгийн хэрэглээний давтамжаар ойролцоогоор тооцогдоно (≈). Эх сурвалж: суурилуулсан үгийн жагсаалт, Free Dictionary API, Datamuse, Claude.
   </footer>
 <!-- APP:END -->
   <script src="js/words.js"></script>
