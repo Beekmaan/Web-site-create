@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Үгийн Сан</title>
+  <meta name="description" content="Англи үгийн дуудлага, ижил утгатай үгс, ахисан түвшний үгийн дунд түвшний орлуулга" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<!-- APP:START -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">Aa</span>
+        <div>
+          <h1>Үгийн Сан</h1>
+          <p class="sub">Дуудлага · Ижил үгс · Дунд түвшний орлуулга</p>
+        </div>
+      </div>
+      <button class="icon-btn" id="themeToggle" aria-label="Өнгөний горим солих">🌓</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <form class="search" id="searchForm" autocomplete="off">
+      <div class="search-box">
+        <span class="search-icon" aria-hidden="true">⌕</span>
+        <input id="q" type="search" list="sugList" placeholder="Англи үг бичнэ үү… (жш: ubiquitous)" aria-label="Англи үг" spellcheck="false" autocapitalize="off" />
+        <datalist id="sugList"></datalist>
+      </div>
+      <button class="btn primary" type="submit">Хайх</button>
+      <button class="btn" type="button" id="randomBtn" title="Санамсаргүй ахисан түвшний үг">🎲<span class="hide-sm"> Санамсаргүй</span></button>
+    </form>
+
+    <div class="chips-row" id="historyRow" hidden>
+      <span class="row-label">🕘 Сүүлд:</span>
+      <div class="chips" id="history"></div>
+    </div>
+
+    <!-- Welcome / empty state -->
+    <section id="welcome" class="welcome">
+      <div class="feature-grid">
+        <div class="feature"><span class="f-ico">🔊</span><b>Дуудлага</b><span>IPA тэмдэглэгээ, 🇺🇸 / 🇬🇧 аудио, удаан горим</span></div>
+        <div class="feature"><span class="f-ico">🔁</span><b>Ижил төстэй үгс</b><span>Түвшингээр өнгөөр ялгагдсан</span></div>
+        <div class="feature hl"><span class="f-ico">🎯</span><b>Дунд түвшний орлуулга</b><span>Ахисан (C1/C2) үгийн энгийн (B1/B2) хувилбар</span></div>
+      </div>
+      <p class="try">Туршаад үзээрэй:</p>
+      <div class="chips" id="examples"></div>
+      <div class="ladder" aria-label="Түвшний шат">
+        <span class="lvl lvl-A">A</span><span class="lvl lvl-B1">B1</span><span class="lvl lvl-B2">B2</span><span class="lvl lvl-C1">C1</span><span class="lvl lvl-C2">C2</span>
+        <small>энгийн → ахисан</small>
+      </div>
+    </section>
+
+    <div id="status" class="status" hidden></div>
+
+    <!-- Result -->
+    <section id="result" hidden>
+      <article class="card word-card">
+        <div class="word-head">
+          <div>
+            <h2 id="wTitle" class="w-title"></h2>
+            <div class="w-meta" id="wMeta"></div>
+          </div>
+          <button class="icon-btn star" id="saveBtn" aria-label="Хадгалах" title="Миний үгс рүү хадгалах">☆</button>
+        </div>
+        <div class="pron" id="pron"></div>
+        <div class="mn" id="mn"></div>
+      </article>
+
+      <article class="card mid-card" id="midCard">
+        <h3 id="midTitle"></h3>
+        <p class="hint" id="midHint"></p>
+        <div class="mid-list" id="midList"></div>
+      </article>
+
+      <article class="card" id="defCard" hidden>
+        <h3>📖 Тайлбар</h3>
+        <div id="defs"></div>
+      </article>
+
+      <article class="card" id="synCard">
+        <div class="card-head">
+          <h3>🔁 Ижил төстэй үгс</h3>
+          <div class="legend">
+            <span class="lvl lvl-A">A</span><span class="lvl lvl-B1">B1</span><span class="lvl lvl-B2">B2</span><span class="lvl lvl-C1">C1</span><span class="lvl lvl-C2">C2</span>
+          </div>
+        </div>
+        <div class="chips" id="syns"></div>
+      </article>
+    </section>
+
+    <section class="card saved" id="savedCard" hidden>
+      <div class="card-head">
+        <h3>⭐ Миний үгс <span class="count" id="savedCount"></span></h3>
+        <button class="link-btn" id="clearSaved" type="button">Бүгдийг устгах</button>
+      </div>
+      <ul class="saved-list" id="savedList"></ul>
+    </section>
+  </main>
+
+  <footer class="foot">
+    Түвшин нь үгийн хэрэглээний давтамжаар ойролцоогоор тооцогдоно (≈). Эх сурвалж: Free Dictionary API, Datamuse.
+  </footer>
+<!-- APP:END -->
+  <script src="js/words.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
