@@ -47,6 +47,11 @@
         <div class="stat-value" id="sumExpense">0 ₮</div>
         <div class="stat-foot" id="expenseCount">0 гүйлгээ</div>
       </article>
+      <article class="card stat saving">
+        <div class="stat-head">Хуримтлал</div>
+        <div class="stat-value" id="sumSaving">0 ₮</div>
+        <div class="stat-foot" id="savingTotal">Нийт: 0 ₮</div>
+      </article>
       <article class="card stat balance">
         <div class="stat-head">Үлдэгдэл</div>
         <div class="stat-value" id="sumBalance">0 ₮</div>
@@ -121,10 +126,22 @@
           <div class="bar-legend">
             <span><i class="sw income"></i>Орлого</span>
             <span><i class="sw expense"></i>Зарлага</span>
+            <span><i class="sw saving"></i>Хуримтлал</span>
           </div>
         </div>
       </section>
     </div>
+
+    <section class="card savings" id="savingsSection">
+      <div class="list-head">
+        <div>
+          <h2>Хуримтлал</h2>
+          <p class="muted small savings-sum" id="savingsSummary"></p>
+        </div>
+        <button class="btn primary" id="addGoal">+ Зорилго нэмэх</button>
+      </div>
+      <div class="goals" id="goalList"></div>
+    </section>
 
     <section class="card">
       <div class="list-head">
@@ -135,6 +152,7 @@
             <option value="all">Бүгд</option>
             <option value="income">Орлого</option>
             <option value="expense">Зарлага</option>
+            <option value="saving">Хуримтлал</option>
           </select>
         </div>
       </div>
@@ -154,6 +172,7 @@
         <input type="file" id="importJson" accept="application/json,.json" class="hidden" />
         <button class="btn danger-soft" id="clearAll">Бүгдийг устгах</button>
       </div>
+      <div class="my-cats" id="myCats"></div>
       <p class="muted small" id="storageText">Өгөгдөл зөвхөн таны хөтөч (browser) дээр хадгалагдана.</p>
     </section>
   </main>
@@ -162,6 +181,8 @@
     <div class="modal-box">
       <h3 id="modalTitle"></h3>
       <p id="modalText"></p>
+      <div class="modal-fields" id="modalFields"></div>
+      <p class="modal-error hidden" id="modalError"></p>
       <div class="modal-actions">
         <button class="btn ghost" id="modalCancel">Болих</button>
         <button class="btn danger" id="modalOk">Устгах</button>
